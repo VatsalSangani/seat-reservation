@@ -1,3 +1,4 @@
+import logging
 import uuid
 from contextlib import asynccontextmanager
 
@@ -7,6 +8,7 @@ from pydantic import BaseModel, Field, StrictInt, field_validator
 
 from app import auth, db
 from app.reserve import Decline, cancel, reserve, show_state
+from app.resilience import with_retry
 
 
 # ---------- startup / shutdown ----------
@@ -24,10 +26,23 @@ app = FastAPI(title="Seat Reservation", lifespan=lifespan)
 # ---------- domain declines -> clean 4xx JSON ----------
 @app.exception_handler(Decline)
 async def decline_handler(request: Request, exc: Decline):
+    headers = {"Retry-After": "1"} if exc.status == 429 else None
     return JSONResponse(
         status_code=exc.status,
         content={"error": exc.reason, "message": exc.message, **exc.extra},
+        headers=headers,
     )
+
+log = logging.getLogger("seat.app")
+
+
+@app.exception_handler(Exception)
+async def unexpected_handler(request: Request, exc: Exception):
+    # Safety net only: should never fire. Logged loudly, JSON body.
+    log.exception("unhandled error on %s %s", request.method, request.url.path)
+    return JSONResponse(status_code=500,
+                        content={"error": "internal_error",
+                                 "message": "unexpected server error"})
 
 
 # ---------- health ----------
@@ -74,7 +89,7 @@ class CreateShow(BaseModel):
 @app.post("/shows", status_code=201)
 async def create_show(body: CreateShow,
                       admin: auth.User = Depends(auth.require_admin)):
-    async with db.pool().acquire() as conn:
+    async with db.acquire() as conn:
         async with conn.transaction():       # show + seats, all or nothing
             row = await conn.fetchrow(
                 """INSERT INTO shows (name, price_paise, per_user_limit)
@@ -136,18 +151,19 @@ async def reserve_seats(
         raise Decline(400, "idempotency_key_required",
                       "idempotency key is required")
 
-    result, replayed = await reserve(parse_uuid(show_id, "show"),
-                                     user.user_id, body.seats, key)
+    result, replayed = await with_retry(
+        reserve, parse_uuid(show_id, "show"), user.user_id, body.seats, key)
+
     headers = {"Idempotent-Replayed": "true"} if replayed else {}
     return JSONResponse(status_code=201, content=result, headers=headers)
 
 @app.get("/shows/{show_id}")
 async def get_show(show_id: str):
-    return await show_state(parse_uuid(show_id, "show"))
+        return await with_retry(show_state, parse_uuid(show_id, "show"))
 
 
 @app.post("/reservations/{reservation_id}/cancel")
 async def cancel_reservation(reservation_id: str,
                              user: auth.User = Depends(auth.current_user)):
-    return await cancel(parse_uuid(reservation_id, "reservation"),
-                        user.user_id)
+        return await with_retry(cancel, parse_uuid(reservation_id, "reservation"),
+                            user.user_id)

@@ -28,7 +28,7 @@ async def reserve(show_id: uuid.UUID, user_id: str, seats: list[str],
     seats = sorted(seats)
     req_hash = request_hash(show_id, seats)
 
-    async with db.pool().acquire() as conn:
+    async with db.acquire() as conn:
         try:
             async with conn.transaction():
                 show = await conn.fetchrow(
@@ -118,7 +118,7 @@ async def reserve(show_id: uuid.UUID, user_id: str, seats: list[str],
 async def cancel(reservation_id: uuid.UUID, user_id: str) -> dict:
     """Owner-only cancel. Safe to retry. Never frees a seat that
     belongs to a different reservation."""
-    async with db.pool().acquire() as conn:
+    async with db.acquire() as conn:
         async with conn.transaction():
             res = await conn.fetchrow(
                 """SELECT show_id, user_id, status, seats FROM reservations
@@ -157,7 +157,7 @@ async def cancel(reservation_id: uuid.UUID, user_id: str) -> dict:
 
 async def show_state(show_id: uuid.UUID) -> dict:
     """One query = one consistent snapshot, so the counts always add up."""
-    async with db.pool().acquire() as conn:
+    async with db.acquire() as conn:
         show = await conn.fetchrow(
             """SELECT id, name, price_paise, per_user_limit
                FROM shows WHERE id = $1""",
