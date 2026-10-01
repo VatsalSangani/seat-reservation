@@ -6,7 +6,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, StrictInt, field_validator
 
 from app import auth, db
-from app.reserve import Decline, reserve
+from app.reserve import Decline, cancel, reserve, show_state
 
 
 # ---------- startup / shutdown ----------
@@ -112,11 +112,11 @@ class ReserveRequest(BaseModel):
         return cleaned
 
 
-def parse_show_id(value: str) -> uuid.UUID:
+def parse_uuid(value: str, what: str) -> uuid.UUID:
     try:
         return uuid.UUID(value)
     except ValueError:
-        raise Decline(404, "show_not_found", "show not found")
+        raise Decline(404, f"{what}_not_found", f"{what} not found") from None
 
 
 @app.post("/shows/{show_id}/reserve", status_code=201)
@@ -136,7 +136,18 @@ async def reserve_seats(
         raise Decline(400, "idempotency_key_required",
                       "idempotency key is required")
 
-    result, replayed = await reserve(parse_show_id(show_id),
+    result, replayed = await reserve(parse_uuid(show_id, "show"),
                                      user.user_id, body.seats, key)
     headers = {"Idempotent-Replayed": "true"} if replayed else {}
     return JSONResponse(status_code=201, content=result, headers=headers)
+
+@app.get("/shows/{show_id}")
+async def get_show(show_id: str):
+    return await show_state(parse_uuid(show_id, "show"))
+
+
+@app.post("/reservations/{reservation_id}/cancel")
+async def cancel_reservation(reservation_id: str,
+                             user: auth.User = Depends(auth.current_user)):
+    return await cancel(parse_uuid(reservation_id, "reservation"),
+                        user.user_id)

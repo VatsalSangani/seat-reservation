@@ -16,4 +16,17 @@ dependencies = [
 dev = [
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
+    "ruff>=0.16.10",
+]
+
+[tool.ruff.lint]
+extend-select = ["B", "SIM", "F"]
+ignore = ["SIM117"]   # nested `async with` keeps the transaction scope explicit
+
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = [
+    "fastapi.Depends",
+    "fastapi.Header",
+    "fastapi.Query",
+    "fastapi.Path",
 ]
