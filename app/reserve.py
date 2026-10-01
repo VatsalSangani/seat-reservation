@@ -113,4 +113,71 @@ async def reserve(show_id: uuid.UUID, user_id: str, seats: list[str],
         except asyncpg.UniqueViolationError:
             # safety net: same key raced in from another show
             raise Decline(409, "idempotency_key_reused",
-                          "key already used with a different request")
+                          "key already used with a different request") from None
+
+async def cancel(reservation_id: uuid.UUID, user_id: str) -> dict:
+    """Owner-only cancel. Safe to retry. Never frees a seat that
+    belongs to a different reservation."""
+    async with db.pool().acquire() as conn:
+        async with conn.transaction():
+            res = await conn.fetchrow(
+                """SELECT show_id, user_id, status, seats FROM reservations
+                   WHERE id = $1 FOR UPDATE""",
+                reservation_id)
+            # not found and not-yours look identical: don't leak existence
+            if res is None or res["user_id"] != user_id:
+                raise Decline(404, "reservation_not_found",
+                              "reservation not found")
+            if res["status"] == "cancelled":
+                return {"reservation_id": str(reservation_id),
+                        "status": "cancelled", "released_seats": []}
+
+            # same lock order as reserve(): quota row, then seats
+            await conn.execute(
+                """SELECT held_count FROM user_show_quota
+                   WHERE show_id = $1 AND user_id = $2 FOR UPDATE""",
+                res["show_id"], user_id)
+            released = await conn.fetch(
+                """UPDATE seats SET status = 'available', user_id = NULL,
+                          reservation_id = NULL, updated_at = now()
+                   WHERE show_id = $1 AND reservation_id = $2
+                   RETURNING label""",
+                res["show_id"], reservation_id)
+            labels = sorted(r["label"] for r in released)
+            await conn.execute(
+                """UPDATE user_show_quota SET held_count = held_count - $3
+                   WHERE show_id = $1 AND user_id = $2""",
+                res["show_id"], user_id, len(labels))
+            await conn.execute(
+                "UPDATE reservations SET status = 'cancelled' WHERE id = $1",
+                reservation_id)
+            return {"reservation_id": str(reservation_id),
+                    "status": "cancelled", "released_seats": labels}
+
+
+async def show_state(show_id: uuid.UUID) -> dict:
+    """One query = one consistent snapshot, so the counts always add up."""
+    async with db.pool().acquire() as conn:
+        show = await conn.fetchrow(
+            """SELECT id, name, price_paise, per_user_limit
+               FROM shows WHERE id = $1""",
+            show_id)
+        if show is None:
+            raise Decline(404, "show_not_found", "show not found")
+        seats = await conn.fetch(
+            "SELECT label, status FROM seats WHERE show_id = $1 ORDER BY label",
+            show_id)
+
+    counts = {"available": 0, "held": 0, "confirmed": 0}
+    for s in seats:
+        counts[s["status"]] += 1
+    total = len(seats)
+    return {
+        "id": str(show["id"]), "name": show["name"],
+        "price_paise": show["price_paise"],
+        "per_user_limit": show["per_user_limit"],
+        "total_seats": total,
+        "counts": counts,
+        "invariant_ok": sum(counts.values()) == total,
+        "seats": [{"label": s["label"], "status": s["status"]} for s in seats],
+    }

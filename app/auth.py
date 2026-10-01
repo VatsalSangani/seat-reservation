@@ -39,7 +39,7 @@ async def current_user(
         payload = jwt.decode(creds.credentials, config.JWT_SECRET,
                              algorithms=["HS256"])
     except jwt.PyJWTError:
-        raise HTTPException(401, "invalid or expired token")
+        raise HTTPException(401, "invalid or expired token") from None
     return User(user_id=payload["sub"], role=payload.get("role", "user"))
 
 
