@@ -1,6 +1,7 @@
 import contextvars
 import json
 import logging
+import sys
 
 from prometheus_client import Counter, Gauge, Histogram
 
@@ -26,7 +27,7 @@ class JsonFormatter(logging.Formatter):
 
 
 def setup_logging(level: str = "INFO") -> None:
-    handler = logging.StreamHandler()
+    handler = logging.StreamHandler(sys.stdout)
     handler.setFormatter(JsonFormatter())
     root = logging.getLogger()
     root.handlers[:] = [handler]
