@@ -51,3 +51,7 @@ async def run_migrations() -> None:
                         path.name)
         finally:
             await conn.execute("SELECT pg_advisory_unlock(727001)")
+
+def acquire():
+    """Pool connection with a wait limit; raises asyncio.TimeoutError."""
+    return pool().acquire(timeout=config.DB_ACQUIRE_TIMEOUT)
