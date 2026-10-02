@@ -47,9 +47,18 @@ async def main(base: str, users: int, concurrency: int, admin_key: str):
         show = r.json()["id"]
         print(f"show {show}: {len(seats)} seats, {users} users")
 
-        # tokens up front (not part of the measured stampede)
-        tokens = await asyncio.gather(*(token(f"burst-u{i}") for i in range(users)))
+        # tokens up front (not part of the measured stampede),
+        # through the same concurrency limit so httpx's pool isn't flooded
+        async def limited_token(uid):
+            async with sem:
+                return await token(uid)
+
+        t_tokens = time.perf_counter()
+        tokens = await asyncio.gather(
+            *(limited_token(f"burst-u{i}") for i in range(users)))
         greedy = await token("burst-greedy")
+        print(f"{len(tokens)} tokens ready in "
+              f"{time.perf_counter() - t_tokens:.1f}s, starting stampede")
 
         jobs, kinds = [], []
 
@@ -120,8 +129,10 @@ async def main(base: str, users: int, concurrency: int, admin_key: str):
                     greedy_wins += 1
                 if kind == "spoof" and b["user_id"] == "victim":
                     spoof_ok = False
-        dup_results = [(s, b) for (s, b), k in zip(results, kinds, strict = True) if k == "dup"]
-        dup_ids = Counter(b.get("reservation_id") for s, b in dup_results if s == 201)
+        dup_results = [(s, b) for (s, b), k in zip(results, kinds, strict=True)
+                       if k == "dup"]
+        dup_ids = Counter(b.get("reservation_id")
+                          for s, b in dup_results if s == 201)
 
         _, final = await call("GET", f"/shows/{show}")
         counts = final["counts"]
