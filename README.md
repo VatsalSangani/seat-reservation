@@ -62,6 +62,16 @@ curl localhost:8000/health/ready
 uv sync
 docker compose up -d --wait db
 uv run uvicorn app.main:app --env-file .env --reload
+
+## Test the live deployment
+```bash
+export URL=https://seat-reservation-production-ace1.up.railway.app
+export ADMIN_KEY=<key from the submission email>
+
+curl -s $URL/health/ready
+./burst.sh $URL --users 5000 --concurrency 200   # change --users for a bigger/smaller burst (18000 ≈ 20,000 reservations)
+curl -s $URL/metrics | grep -E "^reservations_"
+
 ```
 Copy `.env.example` to `.env` for local development.
 
