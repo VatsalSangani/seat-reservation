@@ -1,19 +1,18 @@
 # Write-up
 
 ## Results
-**Live deployment (Railway, EU West):** 5,526 concurrent reservations against
-a fresh 200-seat show: every seat sold exactly once, zero 5xx, zero network
-errors, invariant `available + held + confirmed == total` held during and
-after the burst, per-user limit held, duplicate keys produced one reservation
-each, spoofed identity ignored.
+**Live deployment (Railway, EU West):** 19,773 concurrent reservations
+(18,000 users plus duplicate-key and over-limit traffic) against a fresh
+200-seat show: all 200 seats sold exactly once, zero 5xx, zero network errors,
+invariant `available + held + confirmed == total` held during and after the
+burst, per-user limit held, duplicate keys produced one reservation each,
+spoofed identity ignored. (An earlier 5,526-reservation live run also passed.)
 
-**Scale (identical Docker image, local):** 19,830 concurrent reservations
-(18,000 users plus duplicate-key and over-limit traffic): all ten checks pass,
-zero 5xx, 200/200 seats sold exactly once.
+**Same image, locally:** 19,830 reservations, all checks pass, 132 req/s.
 
-Live runs from India to EU West were limited by the single-process load
-generator and network distance (about 50 req/s), while server-side mean
-reserve latency stayed around 40 ms. The local run reached 132 req/s.
+Live throughput (about 48 req/s) was limited by the single-process load
+generator and the network distance from India to EU West; server-side mean
+reserve latency stayed around 40 ms.
 
 ## 1. The atomic decision
 Everything happens in one Postgres transaction per request:
