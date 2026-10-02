@@ -12,3 +12,22 @@ services:
       interval: 2s
       timeout: 3s
       retries: 15
+
+  app:
+    build: .
+    environment:
+      DATABASE_URL: postgresql://app:app@db:5432/seats
+      JWT_SECRET: local-dev-secret
+      ADMIN_KEY: local-admin-key
+      DB_POOL_MAX: "10"
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy     # app waits for a healthy DB
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready')"]
+      interval: 5s
+      timeout: 3s
+      retries: 10

@@ -66,7 +66,7 @@ async def request_context(request: Request, call_next):
 async def decline_handler(request: Request, exc: Decline):
     if request.url.path.endswith("/reserve"):
         RESERVATIONS_DECLINED.labels(exc.reason).inc()
-        log.info("reserve_declined", extra={"fields": {
+        log.debug("reserve_declined", extra={"fields": {
             "reason": exc.reason, "status": exc.status}})
     headers = {"Retry-After": "1"} if exc.status == 429 else None
     return JSONResponse(
@@ -236,7 +236,7 @@ async def reserve_seats(
         RESERVATIONS_DECLINED.labels("idempotent_replay").inc()
     else:
         RESERVATIONS_CONFIRMED.inc()
-    log.info("reserve_ok", extra={"fields": {
+    log.debug("reserve_ok", extra={"fields": {
         "show_id": result["show_id"], "user_id": user.user_id,
         "seats": result["seats"], "replayed": replayed}})
 

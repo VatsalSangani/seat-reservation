@@ -29,14 +29,39 @@ async def reserve(show_id: uuid.UUID, user_id: str, seats: list[str],
     req_hash = request_hash(show_id, seats)
 
     async with db.acquire() as conn:
+        # ---------- fast path: no transaction, no locks ----------
+        show = await conn.fetchrow(
+            "SELECT price_paise, per_user_limit FROM shows WHERE id = $1",
+            show_id)
+        if show is None:
+            raise Decline(404, "show_not_found", "show not found")
+
+        # 1. committed state only: if a seat is already taken, it really is
+        taken = await conn.fetch(
+            """SELECT label FROM seats
+               WHERE show_id = $1 AND label = ANY($2::text[])
+                 AND status <> 'available'
+               ORDER BY label""",
+            show_id, seats)
+
+        # 2. checked AFTER the seat read: a booking and its key commit together,
+        #    so if we saw our own booking above, we will see our key here
+        prev = await conn.fetchrow(
+            """SELECT request_hash, response FROM idempotency_keys
+               WHERE user_id = $1 AND key = $2""",
+            user_id, key)
+        if prev:
+            if prev["request_hash"] != req_hash:
+                raise Decline(409, "idempotency_key_reused",
+                              "key already used with a different request")
+            return json.loads(prev["response"]), True
+        if taken:
+            raise Decline(409, "seat_taken", "seat already taken",
+                          seats=[r["label"] for r in taken])
+
+        # ---------- locked path: the final, race-free decision ----------
         try:
             async with conn.transaction():
-                show = await conn.fetchrow(
-                    "SELECT price_paise, per_user_limit FROM shows WHERE id = $1",
-                    show_id)
-                if show is None:
-                    raise Decline(404, "show_not_found", "show not found")
-
                 # ① serialise THIS user's requests for THIS show
                 await conn.execute(
                     """INSERT INTO user_show_quota (show_id, user_id)
@@ -47,7 +72,7 @@ async def reserve(show_id: uuid.UUID, user_id: str, seats: list[str],
                        WHERE show_id = $1 AND user_id = $2 FOR UPDATE""",
                     show_id, user_id)
 
-                # ② idempotency (checked while holding the user lock)
+                # ② idempotency again, now under the user lock
                 prev = await conn.fetchrow(
                     """SELECT request_hash, response FROM idempotency_keys
                        WHERE user_id = $1 AND key = $2""",
