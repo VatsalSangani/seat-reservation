@@ -1,12 +1,19 @@
 # Write-up
 
-## Results (live Railway deployment)
-5,526 concurrent reservations against a fresh 200-seat show:
-200 confirmed, every seat exactly once; 201 x242 (incl. idempotent replays),
-409 x5,284; **zero 5xx, zero network errors**; invariant
-`available + held + confirmed == total` held during and after the burst;
-per-user limit held; duplicate keys produced one reservation each; spoofed
-identity ignored.
+## Results
+**Live deployment (Railway, EU West):** 5,526 concurrent reservations against
+a fresh 200-seat show: every seat sold exactly once, zero 5xx, zero network
+errors, invariant `available + held + confirmed == total` held during and
+after the burst, per-user limit held, duplicate keys produced one reservation
+each, spoofed identity ignored.
+
+**Scale (identical Docker image, local):** 19,830 concurrent reservations
+(18,000 users plus duplicate-key and over-limit traffic): all ten checks pass,
+zero 5xx, 200/200 seats sold exactly once.
+
+Live runs from India to EU West were limited by the single-process load
+generator and network distance (about 50 req/s), while server-side mean
+reserve latency stayed around 40 ms. The local run reached 132 req/s.
 
 ## 1. The atomic decision
 Everything happens in one Postgres transaction per request:
@@ -92,6 +99,10 @@ log line has the full context and traceback.
   "database starting up" errors.
 - Python logs went to stderr, so Railway showed every request as an error;
   now stdout.
+- The burst script queued 18,000 token requests at once, which stalled
+  httpx's connection pool; then a single dropped connection crashed setup.
+  Fixed by routing every request through the concurrency limit and
+  retrying network errors during setup (never during the measured burst).
 
 ## 7. Performance note
 Local and live bursts plateaued at about 50-90 req/s, but server metrics
