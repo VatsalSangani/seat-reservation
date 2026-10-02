@@ -15,8 +15,11 @@ TRANSIENT = (
     asyncpg.exceptions.SerializationError,
     asyncpg.exceptions.LockNotAvailableError,
     asyncpg.exceptions.TooManyConnectionsError,
-    asyncpg.exceptions.ConnectionDoesNotExistError,
-    asyncio.TimeoutError,             # pool wait or statement timeout
+    asyncpg.exceptions.ConnectionDoesNotExistError,  # pooled conn died (DB restart)
+    asyncpg.exceptions.CannotConnectNowError,        # DB still starting up
+    ConnectionRefusedError,                          # DB briefly unreachable
+    ConnectionResetError,                            # connection dropped mid-query
+    asyncio.TimeoutError,                            # pool wait or statement timeout
 )
 
 
